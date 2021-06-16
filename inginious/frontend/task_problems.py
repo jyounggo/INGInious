@@ -185,12 +185,12 @@ class DisplayableMultipleChoiceProblem(MultipleChoiceProblem, DisplayableProblem
                 if entry['valid'] and limit > 0:
                     choices.append(entry)
                     limit = limit - 1
-
-        rand.shuffle(choices)
-
+        if self._shuffle:
+            rand.shuffle(choices)
+        else:
+            choices = sorted(choices, key=lambda k: k['index'])
         header = ParsableText(self.gettext(language, self._header), "rst",
                               translation=self.get_translation_obj(language))
-
         return template_helper.render("tasks/multiple_choice.html", pid=self.get_id(), header=header,
                                       checkbox=self._multiple, choices=choices,
                                       func=lambda text: ParsableText(
