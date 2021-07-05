@@ -160,7 +160,8 @@ class DisplayableMultipleChoiceProblem(MultipleChoiceProblem, DisplayableProblem
         # Ensure that the choices are random
         # we *do* need to copy the choices here
         random_order_choices = list(self._choices)
-        rand.shuffle(random_order_choices)
+        if self._shuffle:
+            rand.shuffle(random_order_choices)
 
         if self._multiple:
             # take only the valid choices in the first pass
