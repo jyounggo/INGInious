@@ -7,6 +7,7 @@ import json
 import logging
 import flask
 from collections import OrderedDict
+from natsort import natsorted
 
 from inginious.frontend.pages.course_admin.utils import INGIniousAdminPage
 
@@ -16,47 +17,36 @@ class CourseTaskListPage(INGIniousAdminPage):
 
     def GET_AUTH(self, courseid):  # pylint: disable=arguments-differ
         """ GET request """
-        course, __ = self.get_course_and_check_rights(courseid, allow_all_staff=True)
+        course, __ = self.get_course_and_check_rights(courseid)
         return self.page(course)
 
     def POST_AUTH(self, courseid):  # pylint: disable=arguments-differ
         """ POST request """
-        course, __ = self.get_course_and_check_rights(courseid, allow_all_staff=False)
+        course, __ = self.get_course_and_check_rights(courseid)
 
         errors = []
         user_input = flask.request.form
-
         if "task_dispenser" in user_input:
             selected_task_dispenser = user_input.get("task_dispenser", "toc")
             task_dispenser_class = self.course_factory.get_task_dispensers().get(selected_task_dispenser, None)
             if task_dispenser_class:
                 self.course_factory.update_course_descriptor_element(courseid, 'task_dispenser', task_dispenser_class.get_id())
-                self.course_factory.update_course_descriptor_element(courseid, 'dispenser_data', "")
+                self.course_factory.update_course_descriptor_element(courseid, 'dispenser_data', {})
             else:
                 errors.append(_("Invalid task dispenser"))
+        elif "migrate_tasks" in user_input:
+            task_dispenser = course.get_task_dispenser()
+            try:
+                data = task_dispenser.import_legacy_tasks()
+                self.update_dispenser(course, data)
+            except Exception as e:
+                errors.append(_("Something wrong happened: ") + str(e))
         else:
             try:
-                task_dispenser = course.get_task_dispenser()
-                data, msg = task_dispenser.check_dispenser_data(user_input["course_structure"])
-                if data:
-                    self.course_factory.update_course_descriptor_element(courseid, 'task_dispenser', task_dispenser.get_id())
-                    self.course_factory.update_course_descriptor_element(courseid, 'dispenser_data', data)
-                else:
-                    errors.append(_("Invalid course structure: ") + msg)
+                self.update_dispenser(course, json.loads(user_input["dispenser_structure"]))
             except Exception as e:
                 errors.append(_("Something wrong happened: ") + str(e))
 
-            for taskid in json.loads(user_input.get("new_tasks", "[]")):
-                try:
-                    self.task_factory.create_task(course, taskid, {
-                        "name": taskid, "accessible": False, "problems": {}, "environment_type": "mcq"})
-                except Exception as ex:
-                    errors.append(_("Couldn't create task {} : ").format(taskid) + str(ex))
-            for taskid in json.loads(user_input.get("deleted_tasks", "[]")):
-                try:
-                    self.task_factory.delete_task(courseid, taskid)
-                except Exception as ex:
-                    errors.append(_("Couldn't delete task {} : ").format(taskid) + str(ex))
             for taskid in json.loads(user_input.get("wiped_tasks", "[]")):
                 try:
                     self.wipe_task(courseid, taskid)
@@ -64,9 +54,19 @@ class CourseTaskListPage(INGIniousAdminPage):
                     errors.append(_("Couldn't wipe task {} : ").format(taskid) + str(ex))
 
         # don't forget to reload the modified course
-        course, __ = self.get_course_and_check_rights(courseid, allow_all_staff=False)
-
+        course, __ = self.get_course_and_check_rights(courseid)
         return self.page(course, errors, not errors)
+
+    def update_dispenser(self, course, dispenser_data):
+        """ Update the task dispenser based on dispenser_data """
+        task_dispenser = course.get_task_dispenser()
+        data, msg = task_dispenser.check_dispenser_data(dispenser_data)
+        if data:
+            self.course_factory.update_course_descriptor_element(course.get_id(), 'task_dispenser',
+                                                                 task_dispenser.get_id())
+            self.course_factory.update_course_descriptor_element(course.get_id(), 'dispenser_data', data)
+        else:
+            raise Exception(_("Invalid course structure: ") + msg)
 
     def submission_url_generator(self, taskid):
         """ Generates a submission url """
@@ -80,8 +80,8 @@ class CourseTaskListPage(INGIniousAdminPage):
                 if key in submission and type(submission[key]) == bson.objectid.ObjectId:
                     self.submission_manager.get_gridfs().delete(submission[key])
 
-        self.database.user_tasks.remove({"courseid": courseid, "taskid": taskid})
-        self.database.submissions.remove({"courseid": courseid, "taskid": taskid})
+        self.database.user_tasks.delete_many({"courseid": courseid, "taskid": taskid})
+        self.database.submissions.delete_many({"courseid": courseid, "taskid": taskid})
 
         logging.getLogger("inginious.webapp.task_edit").info("Task %s/%s wiped.", courseid, taskid)
 
@@ -89,26 +89,27 @@ class CourseTaskListPage(INGIniousAdminPage):
         """ Get all data and display the page """
 
         # Load tasks and verify exceptions
-        files = self.task_factory.get_readable_tasks(course)
+        files = self.task_factory.get_readable_tasks(course.get_taskset())
 
-        output = {}
+        tasks = {}
         if errors is None:
             errors = []
-        for task in files:
-            try:
-                output[task] = course.get_task(task)
-            except Exception as inst:
-                errors.append({"taskid": task, "error": str(inst)})
-        tasks = OrderedDict(sorted(list(output.items()), key=lambda t: (course.get_task_dispenser().get_task_order(t[1].get_id()), t[1].get_id())))
 
-        tasks_data = OrderedDict()
-        for taskid in tasks:
-            tasks_data[taskid] = {"name": tasks[taskid].get_name(self.user_manager.session_language()),
-                              "url": self.submission_url_generator(taskid)}
+        tasks_errors = {}
+        for taskid in files:
+            try:
+                tasks[taskid] = course.get_task(taskid)
+            except Exception as ex:
+                tasks_errors[taskid] = str(ex)
+
+        tasks_data = natsorted([(taskid, {"name": tasks[taskid].get_name(self.user_manager.session_language()),
+                                       "url": self.submission_url_generator(taskid)}) for taskid in tasks],
+                            key=lambda x: x[1]["name"])
+        tasks_data = OrderedDict(tasks_data)
 
         task_dispensers = self.course_factory.get_task_dispensers()
 
         return self.template_helper.render("course_admin/task_list.html", course=course,
                                            task_dispensers=task_dispensers, tasks=tasks_data, errors=errors,
-                                           validated=validated, webdav_host=self.webdav_host)
+                                           tasks_errors=tasks_errors, validated=validated)
 

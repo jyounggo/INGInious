@@ -4,13 +4,16 @@
 # more information about the licensing of this file.
 
 """ Profile page """
-import hashlib
 import re
+
 import flask
 from pymongo import ReturnDocument
 from werkzeug.exceptions import NotFound
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError
 
 from inginious.frontend.pages.utils import INGIniousAuthPage
+from inginious.frontend.user_manager import UserManager
 
 
 class ProfilePage(INGIniousAuthPage):
@@ -53,20 +56,21 @@ class ProfilePage(INGIniousAuthPage):
             msg = _("Passwords don't match !")
             return result, msg, error
         elif self.app.allow_registration and len(data["passwd"]) >= 6:
-            oldpasswd_hash = hashlib.sha512(data["oldpasswd"].encode("utf-8")).hexdigest()
-            passwd_hash = hashlib.sha512(data["passwd"].encode("utf-8")).hexdigest()
 
-            match = {"username": self.user_manager.session_username()}
             if "password" in userdata:
-                match["password"] = oldpasswd_hash
+                user = self.user_manager.auth_user(self.user_manager.session_username(), data["oldpasswd"], False)
+            else:
+                user = self.database.users.find_one({"username": userdata["username"]})
 
-            result = self.database.users.find_one_and_update(match,
-                                                             {"$set": {"password": passwd_hash}},
-                                                             return_document=ReturnDocument.AFTER)
-            if not result:
+            if user is None:
                 error = True
                 msg = _("Incorrect old password.")
                 return result, msg, error
+            else:
+                passwd_hash = UserManager.hash_password(data["passwd"])
+                result = self.database.users.find_one_and_update({"username": self.user_manager.session_username()},
+                                                                 {"$set": {"password": passwd_hash}},
+                                                                 return_document=ReturnDocument.AFTER)
 
         # Check if updating language
         if data["language"] != userdata["language"]:

@@ -24,23 +24,18 @@ class INGIniousAdminPage(INGIniousAuthPage):
     An improved version of INGIniousAuthPage that checks rights for the administration
     """
 
-    def get_course_and_check_rights(self, courseid, taskid=None, allow_all_staff=True):
+    def get_course_and_check_rights(self, courseid, taskid=None):
         """ Returns the course with id ``courseid`` and the task with id ``taskid``, and verify the rights of the user.
             Raise app.forbidden() when there is no such course of if the users has not enough rights.
             :param courseid: the course on which to check rights
             :param taskid: If not None, returns also the task with id ``taskid``
-            :param allow_all_staff: allow admins AND tutors to see the page. If false, all only admins.
             :returns (Course, Task)
         """
 
         try:
             course = self.course_factory.get_course(courseid)
-            if allow_all_staff:
-                if not self.user_manager.has_staff_rights_on_course(course):
-                    raise Forbidden(description=_("You don't have staff rights on this course."))
-            else:
-                if not self.user_manager.has_admin_rights_on_course(course):
-                    raise Forbidden(description=_("You don't have admin rights on this course."))
+            if not self.user_manager.has_admin_rights_on_course(course):
+                raise Forbidden(description=_("You don't have admin rights on this course."))
 
             if taskid is None:
                 return course, None
@@ -104,9 +99,8 @@ class INGIniousSubmissionsAdminPage(INGIniousAdminPage):
         # Sanitise tags
         if not user_input.get("tasks", []):
             user_input["tasks"] = []
-        if len(user_input.get("org_tags", [])) == 1 and "," in user_input["org_tags"][0]:
-            user_input["org_tags"] = user_input["org_tags"][0].split(',')
-        user_input["org_tags"] = [org_tag for org_tag in user_input["org_tags"] if org_tag in course.get_tags()]
+        if len(user_input.get("org_categories", [])) == 1 and "," in user_input["org_categories"][0]:
+            user_input["org_categories"] = user_input["org_categories"][0].split(',')
 
         # Sanitise grade
         if "grade_min" in user_input:
@@ -186,7 +180,7 @@ class INGIniousSubmissionsAdminPage(INGIniousAdminPage):
         elif only_tasks_with_categories:
             only_tasks_with_categories = set(only_tasks_with_categories)
             more_tasks = {taskid for taskid, task in course.get_tasks().items() if
-                          only_tasks_with_categories.intersection(task.get_categories())}
+                          only_tasks_with_categories.intersection(course.get_task_dispenser().get_categories(taskid))}
             if only_tasks:
                 self._validate_list(only_tasks)
                 more_tasks.intersection_update(only_tasks)
@@ -344,13 +338,12 @@ def get_menu(course, current, renderer, plugin_manager, user_manager):
         default_entries += [("settings", "<i class='fa fa-cog fa-fw'></i>&nbsp; " + _("Course settings"))]
 
     default_entries += [("stats", "<i class='fa fa-area-chart fa-fw'></i>&nbsp; " + _("Statistics")),
-                        ("students", "<i class='fa fa-user fa-fw'></i>&nbsp; " + _("Users management"))]
+                        ("students", "<i class='fa fa-user fa-fw'></i>&nbsp; " + _("User management"))]
 
     if user_manager.has_admin_rights_on_course(course):
         default_entries += [("tasks", "<i class='fa fa-tasks fa-fw'></i>&nbsp; " + _("Tasks"))]
 
-    default_entries += [("tags", "<i class='fa fa-tags fa-fw'></i>&nbsp;" + _("Tags")),
-                        ("submissions", "<i class='fa fa-file-code-o fa-fw'></i>&nbsp; " + _("Submissions"))]
+    default_entries += [("submissions", "<i class='fa fa-file-code-o fa-fw'></i>&nbsp; " + _("Submissions"))]
 
     if user_manager.has_admin_rights_on_course(course):
         default_entries += [("danger", "<i class='fa fa-bomb fa-fw'></i>&nbsp; " + _("Danger zone"))]
@@ -368,10 +361,7 @@ class CourseRedirectPage(INGIniousAdminPage):
     def GET_AUTH(self, courseid):  # pylint: disable=arguments-differ
         """ GET request """
         course, __ = self.get_course_and_check_rights(courseid)
-        if self.user_manager.session_username() in course.get_tutors():
-            return redirect(self.app.get_homepath() + '/admin/{}/tasks'.format(courseid))
-        else:
-            return redirect(self.app.get_homepath() + '/admin/{}/settings'.format(courseid))
+        return redirect(self.app.get_homepath() + '/admin/{}/settings'.format(courseid))
 
     def POST_AUTH(self, courseid):  # pylint: disable=arguments-differ
         """ POST request """

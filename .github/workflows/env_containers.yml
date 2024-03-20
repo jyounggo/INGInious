@@ -1,0 +1,20 @@
+name: "CD: Env containers"
+
+on:
+  push:
+    branches: [master]
+
+  workflow_dispatch:
+
+jobs:
+  containers_build_and_push:
+    uses: INGInious/.github/.github/workflows/containers.yml@135401b716d3496d81aace75b2a06cd5f21b507c
+    with:
+      working-directory: base-containers
+      context-path: context.yml
+      compose-path: compose.yml
+      registry: ghcr.io
+      container_type: env
+    secrets:
+      GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+      GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}

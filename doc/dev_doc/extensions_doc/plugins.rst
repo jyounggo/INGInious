@@ -25,7 +25,7 @@ The following code adds a new page displaying ``This is a simple demo plugin`` o
             return "This is a simple demo plugin"
 
 
-    def init(plugin_manager, course_factory, client, plugin_config):
+    def init(plugin_manager, taskset_factory, client, plugin_config):
         """ Init the plugin """
         plugin_manager.add_page("/<cookieless:sessionid>plugindemo", DemoPage.as_view('demopage'))
 
@@ -36,8 +36,8 @@ This method takes four arguments:
 - ``plugin_manager`` which is the plugin manager singleton object. The detailed API is available at
   :ref:`inginious.frontend.plugin_manager`.
 
-- ``course_factory`` which is the course factory singleton object, giving you abstraction to the tasks folder. The detailed
-  API is available at :ref:`inginious.frontend.course_factory`.
+- ``taskset_factory`` which is the course factory singleton object, giving you abstraction to the tasks folder. The detailed
+  API is available at :ref:`inginious.frontend.taskset_factory`.
 
 - ``client`` which is the INGInious client singleton object, giving you access to the backend features, as launching
   a new job. The detailed API is available at :ref:`inginious.client.client`.
@@ -78,7 +78,7 @@ would therefore need to add a hook method. This can be done using the ``add_hook
     def submission_done(submission, archive, newsub):
         logging.getLogger("inginious.frontend.plugins.demo").info("Submission " + str(submission['_id']) + " done.")
 
-    def init(plugin_manager, course_factory, client, plugin_config):
+    def init(plugin_manager, taskset_factory, client, plugin_config):
         """ Init the plugin """
         plugin_manager.add_hook("submission_done", submission_done)
 
@@ -100,6 +100,40 @@ Each hook available in INGInious is described here, starting with its name and p
     Used to add links to the administration menu. This hook should return a tuple (link,name) 
     where link is the relative link from the index of the course administration.
     You can also return None.
+``submission_admin_menu`` (``course``, ``task``, ``submission`` ``template_helper``)
+    ``course`` : :ref:`inginious.frontend.courses.Course`
+    
+    ``task`` : :ref:`inginious.frontend.tasks.Task`
+
+    ``submission`` : OrderedDict
+
+    ``template_helper`` : :ref:`inginious.frontend.template_helper.TemplateHelper`
+
+    Returns : HTML or None.
+
+    Used to add HTML to the administration menu displayed at the top of a submission. 
+    ``course`` is the course the submission was made for.
+    ``task`` is the task the submission was made for.
+    ``submission`` is the submission's data.
+    ``template_helper`` is an object of type TemplateHelper, that can be useful to render templates.
+``task_list_item`` (``course``, ``task``, ``tasks_data`` ``template_helper``)
+    ``course`` : :ref:`inginious.frontend.courses.Course`
+    
+    ``task`` : :ref:`inginious.frontend.tasks.Task`
+
+    ``tasks_data`` : dict
+
+    ``template_helper`` : :ref:`inginious.frontend.template_helper.TemplateHelper`
+
+    Returns : HTML or None.
+
+    Used to add HTML underneath each item's progress bar in a course's task list (``/course/<courseid>``).
+    This hook is called once for each task the course has. 
+    If a course has 20 tasks, the hook is then called 20 times each time the task list is rendered.
+    ``course`` is the course the submission was made for.
+    ``task`` is the task the submission was made for.
+    ``tasks_data`` is a dictionary used by INGInious which contains the grade and completion status of each of the course's tasks for the visiting user.
+    ``template_helper`` is an object of type TemplateHelper, that can be useful to render templates.
 ``main_menu`` (``template_helper``)
     ``template_helper`` : :ref:`inginious.frontend.template_helper.TemplateHelper`
 
@@ -152,14 +186,6 @@ Each hook available in INGInious is described here, starting with its name and p
     ``default`` : Default value as specified in the configuration
 
     Overrides the course accessibility.
-``task_accessibility`` (``course``, ``taskid``, ``default``)
-    Returns: inginious.frontend.accessible_time.AccessibleTime
-
-    ``course`` : inginious.frontend.courses.Course
-
-    ``task`` : inginious.frontend.tasks.Task
-
-    ``default`` : Default value as specified in the configuration
 
     Overrides the task accessibility
 ``task_limits`` (``course``, ``taskid``, ``default``)

@@ -46,7 +46,6 @@ class APITasks(APIAuthenticatedPage):
                         "deadline": "",
                         "status": "success"               # can be "succeeded", "failed" or "notattempted"
                         "grade": 0.0,
-                        "grade_weight": 0.0,
                         "context": ""                     # context of the task, in RST
                         "problems":                       # dict of the subproblems
                         {
@@ -62,7 +61,7 @@ class APITasks(APIAuthenticatedPage):
         """
 
         try:
-            course = self.course_factory.get_course(courseid)
+            course = self.taskset_factory.get_course(courseid)
         except:
             raise APINotFound("Course not found")
 
@@ -79,17 +78,15 @@ class APITasks(APIAuthenticatedPage):
 
         output = []
         for taskid, task in tasks.items():
-            task_cache = self.user_manager.get_task_cache(self.user_manager.session_username(), task.get_course_id(), task.get_id())
+            task_cache = self.user_manager.get_task_cache(self.user_manager.session_username(), courseid, task.get_id())
 
             data = {
                 "id": taskid,
                 "name": task.get_name(self.user_manager.session_language()),
                 "authors": task.get_authors(self.user_manager.session_language()),
                 "contact_url": task.get_contact_url(self.user_manager.session_language()),
-                "deadline": task.get_deadline(),
                 "status": "notviewed" if task_cache is None else "notattempted" if task_cache["tried"] == 0 else "succeeded" if task_cache["succeeded"] else "failed",
                 "grade": task_cache.get("grade", 0.0) if task_cache is not None else 0.0,
-                "grade_weight": task.get_grading_weight(),
                 "context": task.get_context(self.user_manager.session_language()).original_content(),
                 "problems": []
             }

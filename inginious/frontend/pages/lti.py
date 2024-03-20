@@ -10,7 +10,7 @@ from inginious.frontend.lti_request_validator import LTIValidator
 from inginious.frontend.pages.utils import INGIniousPage, INGIniousAuthPage
 from itsdangerous import want_bytes
 
-from inginious.common import exceptions
+from inginious.frontend import exceptions
 from inginious.frontend.lti_tool_provider import LTIWebPyToolProvider
 from inginious.frontend.pages.tasks import BaseTaskPage
 
@@ -166,6 +166,7 @@ class LTILaunchPage(INGIniousPage):
     """
     Page called by the TC to start an LTI session on a given task
     """
+    endpoint = 'ltilaunchpage'
 
     def GET(self, courseid, taskid):
         raise MethodNotAllowed()

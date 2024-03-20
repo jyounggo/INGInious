@@ -44,7 +44,7 @@ class CoursePage(INGIniousAuthPage):
 
         user_input = flask.request.form
         if "unregister" in user_input and course.allow_unregister():
-            self.user_manager.course_unregister_user(course, self.user_manager.session_username())
+            self.user_manager.course_unregister_user(courseid, self.user_manager.session_username())
             return redirect(self.app.get_homepath() + '/mycourses')
 
         return self.show_page(course)
@@ -73,23 +73,15 @@ class CoursePage(INGIniousAuthPage):
             # Compute course/tasks scores
             tasks_data = {taskid: {"succeeded": False, "grade": 0.0} for taskid in user_task_list}
             user_tasks = self.database.user_tasks.find({"username": username, "courseid": course.get_id(), "taskid": {"$in": user_task_list}})
-            is_admin = self.user_manager.has_staff_rights_on_course(course, username)
-            tasks_score = [0.0, 0.0]
-
-            for taskid in user_task_list:
-                tasks_score[1] += tasks[taskid].get_grading_weight()
 
             for user_task in user_tasks:
                 tasks_data[user_task["taskid"]]["succeeded"] = user_task["succeeded"]
                 tasks_data[user_task["taskid"]]["grade"] = user_task["grade"]
 
-                weighted_score = user_task["grade"]*tasks[user_task["taskid"]].get_grading_weight()
-                tasks_score[0] += weighted_score
-
-            course_grade = round(tasks_score[0]/tasks_score[1]) if tasks_score[1] > 0 else 0
+            course_grade = course.get_task_dispenser().get_course_grade(username)
 
             # Get tag list
-            tag_list = course.get_tags()
+            categories = course.get_task_dispenser().get_all_categories()
 
             # Get user info
             user_info = self.user_manager.get_user_info(username)
@@ -99,4 +91,4 @@ class CoursePage(INGIniousAuthPage):
                                                submissions=last_submissions,
                                                tasks_data=tasks_data,
                                                grade=course_grade,
-                                               tag_filter_list=tag_list)
+                                               category_filter_list=categories)

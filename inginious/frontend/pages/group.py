@@ -22,29 +22,31 @@ class GroupPage(INGIniousAuthPage):
     def GET_AUTH(self, courseid):  # pylint: disable=arguments-differ
         """ GET request """
 
-        course = self.course_factory.get_course(courseid)
+        course = self.taskset_factory.get_course(courseid)
         username = self.user_manager.session_username()
 
         error = False
         msg = ""
         data = flask.request.args
-        if self.user_manager.has_staff_rights_on_course(course):
+        if self.user_manager.has_admin_rights_on_course(course):
             raise Forbidden(description=_("You can't access this page as a member of the staff."))
-        elif not self.user_manager.course_is_open_to_user(course, lti=False):
+        elif not (self.user_manager.course_is_open_to_user(course, lti=False)
+                  and self.user_manager.course_is_user_registered(course, username)):
             return self.template_helper.render("course_unavailable.html")
         elif "register_group" in data:
             if course.can_students_choose_group():
 
                 group = self.database.groups.find_one(
                     {"courseid": course.get_id(), "students": username})
-
                 if group is not None:
                     group["students"].remove(username)
                     self.database.groups.replace_one({"courseid": course.get_id(), "students": username}, group)
 
-                # Add student in the audience and unique group
-                new_group = self.database.groups.find_one_and_update({"_id": ObjectId(data["register_group"])},
-                                                             {"$push": {"students": username}})
+                # Add student in the audience and unique group if group is not full
+                new_group = self.database.groups.find_one_and_update(
+                    {"_id": ObjectId(data["register_group"]),
+                     "$where": "this.students.length<this.size"},
+                    {"$push": {"students": username}})
 
                 if new_group is None:
                     error = True

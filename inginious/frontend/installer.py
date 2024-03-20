@@ -9,16 +9,16 @@ import hashlib
 import os
 import tarfile
 import tempfile
+import re
 import urllib.request
 from binascii import hexlify
 import docker
 from docker.errors import BuildError
-
 from gridfs import GridFS
 from pymongo import MongoClient
-
+from inginious import __version__
 import inginious.common.custom_yaml as yaml
-
+from inginious.frontend.user_manager import UserManager
 
 HEADER = '\033[95m'
 INFO = '\033[94m'
@@ -36,8 +36,9 @@ BACKGROUND_RED = '\033[101m'
 class Installer:
     """ Custom installer for the WebApp frontend """
 
-    def __init__(self, config_path=None):
+    def __init__(self, config_path=None, default=False):
         self._config_path = config_path
+        self._default = default
 
     #######################################
     #          Display functions          #
@@ -73,9 +74,12 @@ class Installer:
 
     def _ask_with_default(self, question, default=""):
         default = str(default)
-        answer = input(DOC + UNDERLINE + question + " [" + default + "]:" + ENDC + " ")
-        if answer == "":
+        if self._default:
             answer = default
+        else:
+            answer = input(DOC + UNDERLINE + question + " [" + default + "]:" + ENDC + " ")
+            if answer == "":
+                answer = default
         return answer
 
     def _ask_boolean(self, question, default):
@@ -93,6 +97,28 @@ class Installer:
                 return int(self._ask_with_default(question, default))
             except:
                 pass
+
+    def _configure_directory(self, dirtype: str):
+        """Configure user specified directory and create it if required"""
+        self._display_question("Please choose a directory in which to store the %s files." % dirtype)
+        directory = None
+        while directory is None:
+            directory = self._ask_with_default("%s directory" % (dirtype[0].upper()+dirtype[1:]), "./%s" % dirtype)
+            if not os.path.exists(directory):
+                if self._ask_boolean("Path does not exist. Create directory?", True):
+                    try:
+                        os.makedirs(directory)
+                    except FileExistsError:
+                        pass # We should never reach this part since the path is verified above
+                    except PermissionError:
+                        self._display_error("Permission denied. Are you sure of your path?\nIf yes, contact your system administrator"
+                                            " or create manually the directory with the correct user permissions.\nOtherwise, you may"
+                                            " enter a new path now.")
+                        directory = None
+                else:
+                    directory = None
+
+        return os.path.abspath(directory)
 
     #######################################
     #            Main function            #
@@ -314,7 +340,7 @@ class Installer:
         database_name = "INGInious"
 
         should_ask = True
-        if self.try_mongodb_opts(host, database_name):
+        if self.try_mongodb_opts(host, database_name) is not None:
             should_ask = self._ask_boolean(
                 "Successfully connected to MongoDB. Do you want to edit the configuration anyway?", False)
         else:
@@ -341,22 +367,13 @@ class Installer:
 
     def configure_task_directory(self):
         """ Configure task directory """
-        self._display_question(
-            "Please choose a directory in which to store the course/task files. By default, the tool will put them in the current "
-            "directory")
-        task_directory = None
-        while task_directory is None:
-            task_directory = self._ask_with_default("Task directory", ".")
-            if not os.path.exists(task_directory):
-                self._display_error("Path does not exists")
-                if self._ask_boolean("Would you like to retry?", True):
-                    task_directory = None
+        task_directory = self._configure_directory("tasks")
 
         if os.path.exists(task_directory):
             self._display_question("Demonstration tasks can be downloaded to let you discover INGInious.")
             if self._ask_boolean("Would you like to download them ?", True):
                 try:
-                    self._retrieve_and_extract_tarball("https://api.github.com/repos/UCL-INGI/INGInious-demo-tasks/tarball", task_directory)
+                    self._retrieve_and_extract_tarball("https://api.github.com/repos/INGInious/demo-tasks/tarball", task_directory)
                     self._display_info("Successfully downloaded and copied demonstration tasks.")
                 except Exception as e:
                     self._display_error("An error occurred while copying the directory: %s" % str(e))
@@ -376,62 +393,109 @@ class Installer:
         self._display_info("done.".format(name))
 
     def select_containers_to_build(self):
+        # If on a dev branch, download from github master branch (then manually rebuild if needed)
+        # If on an pip installed version, download with the correct tag
         if not self._ask_boolean("Build the default containers? This is highly recommended, and is required to build other containers.", True):
             self._display_info("Skipping container building.")
             return
 
+        # Mandatory images:
+        stock_images = []
+        try:
+            docker_connection = docker.from_env()
+            for image in docker_connection.images.list():
+                for tag in image.attrs["RepoTags"]:
+                    if re.match(r"^ghcr.io/inginious/env-(base|default):v" + __version__, tag):
+                        stock_images.append(tag)
+        except:
+            self._display_info(FAIL + "Cannot connect to Docker!" + ENDC)
+            self._display_info(FAIL + "Restart this command after making sure the command `docker info` works" + ENDC)
+            return
+
+        # If there are already available images, ask to rebuild or not
+        if len(stock_images) >= 2:
+            self._display_info("You already have the minimum required images for version " + __version__)
+            if not self._ask_boolean("Do you want to re-build them ?", "yes"):
+                self._display_info("Continuing with previous images. If you face issues, run inginious-container-update")
+                return
         try:
             with tempfile.TemporaryDirectory() as tmpdirname:
                 self._display_info("Downloading the base container source directory...")
-                self._retrieve_and_extract_tarball("https://api.github.com/repos/UCL-INGI/INGInious/tarball", tmpdirname)
-                self._build_container("ingi/inginious-c-base", os.path.join(tmpdirname, "base-containers", "base"))
-                self._build_container("ingi/inginious-c-default", os.path.join(tmpdirname, "base-containers", "default"))
+                if "dev" in __version__:
+                    tarball_url = "https://api.github.com/repos/UCL-INGI/INGInious/tarball"
+                    containers_version = "dev (github branch master)"
+                    dev = True
+                else:
+                    tarball_url = "https://api.github.com/repos/UCL-INGI/INGInious/tarball/v" + __version__
+                    containers_version = __version__
+                    dev = False
+                self._display_info("Downloading containers for version:" + containers_version)
+                self._retrieve_and_extract_tarball(tarball_url, tmpdirname)
+                self._build_container("ghcr.io/inginious/env-base",
+                                      os.path.join(tmpdirname, "base-containers", "base"))
+                self._build_container("ghcr.io/inginious/env-default",
+                                      os.path.join(tmpdirname, "base-containers", "default"))
+                if dev:
+                    self._display_info("If you modified files in base-containers folder, don't forget to rebuild manually to make these changes effective !")
 
+            # Other non-mandatory containers:
             with tempfile.TemporaryDirectory() as tmpdirname:
                 self._display_info("Downloading the other containers source directory...")
-                self._retrieve_and_extract_tarball("https://api.github.com/repos/UCL-INGI/INGInious-containers/tarball", tmpdirname)
-
-                todo = {"ingi/inginious-c-base": None, "ingi/inginious-c-default": "ingi/inginious-c-base"}
+                self._retrieve_and_extract_tarball(
+                    "https://api.github.com/repos/INGInious/containers/tarball", tmpdirname)
+                # As the add_container function recursively calls itself before adding the entry,
+                # the wanted build order.
+                todo = ["ghcr.io/inginious/env-base", "ghcr.io/inginious/env-default"]
                 available_containers = set(os.listdir(os.path.join(tmpdirname, 'grading')))
                 self._display_info("Done.")
 
-                def add_container(container):
+                def __add_container(container):
+                    """
+                        Add container to the dict of container to build.
+                        :param: container : The prefixed name of the container.
+                    """
+                    if not container.startswith("ghcr.io/inginious/env-"):
+                        container = "ghcr.io/inginious/env-" + container
+
                     if container in todo:
                         return
+                    # getting name of supercontainer to see if need to build
                     line_from = \
-                    [l for l in open(os.path.join(tmpdirname, 'grading', container, 'Dockerfile')).read().split("\n") if
-                     l.startswith("FROM")][0]
+                        [l for l in
+                         open(os.path.join(tmpdirname, 'grading', container[22:], 'Dockerfile')).read().split("\n")
+                         if
+                         l.startswith("FROM")][0]
                     supercontainer = line_from.strip()[4:].strip().split(":")[0]
                     if supercontainer.startswith("ingi/") and supercontainer not in todo:
-                        self._display_info("Container {} requires container {}, I'll build it too.".format(container, supercontainer))
-                        add_container(supercontainer)
-                    todo[container] = supercontainer if supercontainer.startswith("ingi/") else None
+                        self._display_info(
+                            "Container {} requires container {}, I'll build it too.".format(container,
+                                                                                            supercontainer))
+                        __add_container(supercontainer)
+                    todo.append(container)
 
                 self._display_info("The following containers can be built:")
                 for container in available_containers:
-                    self._display_info("\t"+container)
+                    self._display_info("\t" + container)
                 while True:
-                    answer = self._ask_with_default("Indicate the name of a container to build, or press enter to continue")
+                    answer = self._ask_with_default(
+                        "Indicate the name of a container to build, or press enter to continue")
                     if answer == "":
                         break
                     if answer not in available_containers:
                         self._display_warning("Unknown container. Please retry")
                     else:
                         self._display_info("Ok, I'll build container {}".format(answer))
-                        add_container(answer)
+                        __add_container(answer)
 
-                done = {"ingi/inginious-c-base", "ingi/inginious-c-default"}
-                del todo["ingi/inginious-c-base"]
-                del todo["ingi/inginious-c-default"]
-                while len(todo) != 0:
-                    todo_now = [x for x, y in todo.items() if y is None or y in done]
-                    for x in todo_now:
-                        del todo[x]
-                    for container in todo_now:
-                        try:
-                            self._build_container("ingi/inginious-c-{}".format(container), os.path.join(tmpdirname, 'grading', container))
-                        except BuildError:
-                            self._display_error("An error occured while building the container. Please retry manually.")
+                todo.remove("ghcr.io/inginious/env-base")
+                todo.remove("ghcr.io/inginious/env-default")
+                for container in todo:
+                    try:
+                        self._build_container(container,
+                                              os.path.join(tmpdirname, 'grading', container[22:]))
+                    except BuildError:
+                        self._display_error(
+                            "An error occured while building the container. Please retry manually.")
         except Exception as e:
             self._display_error("An error occurred while copying the directory: {}".format(e))
 
@@ -450,17 +514,7 @@ class Installer:
 
     def configure_backup_directory(self):
         """ Configure backup directory """
-        self._display_question("Please choose a directory in which to store the backup files. By default, the tool will them in the current "
-                               "directory")
-        backup_directory = None
-        while backup_directory is None:
-            backup_directory = self._ask_with_default("Backup directory", ".")
-            if not os.path.exists(backup_directory):
-                self._display_error("Path does not exists")
-                if self._ask_boolean("Would you like to retry?", True):
-                    backup_directory = None
-
-        return {"backup_directory": backup_directory}
+        return {"backup_directory": self._configure_directory("backups")}
 
     def ldap_plugin(self):
         """ Configures the LDAP plugin """
@@ -500,15 +554,21 @@ class Installer:
 
         username = self._ask_with_default("Enter the login of the superadmin", "superadmin")
         realname = self._ask_with_default("Enter the name of the superadmin", "INGInious SuperAdmin")
-        email = self._ask_with_default("Enter the email address of the superadmin", "superadmin@inginious.org")
+        email = None
+        while not email:
+            email = self._ask_with_default("Enter the email address of the superadmin", "superadmin@inginious.org")
+            email = UserManager.sanitize_email(email)
+            if email is None:
+                self._display_error("Invalid email format.")
+
         password = self._ask_with_default("Enter the password of the superadmin", "superadmin")
 
-        database.users.insert({"username": username,
-                               "realname": realname,
-                               "email": email,
-                               "password": hashlib.sha512(password.encode("utf-8")).hexdigest(),
-                               "bindings": {},
-                               "language": "en"})
+        database.users.insert_one({"username": username,
+                                   "realname": realname,
+                                   "email": email,
+                                   "password": UserManager.hash_password(password),
+                                   "bindings": {},
+                                   "language": "en"})
 
         options["superadmins"].append(username)
 

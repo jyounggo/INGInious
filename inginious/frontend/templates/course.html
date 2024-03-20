@@ -4,7 +4,7 @@
 {% extends "layout.html" %}
 
 {% set registered = user_manager.course_is_user_registered(course) %}
-{% set staff = user_manager.has_staff_rights_on_course(course) %}
+{% set staff = user_manager.has_admin_rights_on_course(course) %}
 
 {% block title %}{{ course.get_name(user_manager.session_language()) }}{% endblock %}
 
@@ -40,6 +40,7 @@
                 <a class="list-group-item list-group-item-action disabled submission-empty">{{ _("No submissions") }}</a>
             {% endif %}
         </div>
+
     {% endif %}
     {%if staff %}
         {% if not course.is_open_to_non_staff() %}
@@ -48,6 +49,9 @@
             </div>
         {% endif %}
         <div class="list-group">
+            <a class="list-group-item list-group-item-action list-group-item-info" href="{{ get_homepath() }}/user_settings/{{ course.get_id() }}">
+                <i class="fa fa-smile-o fa-fw"></i>&nbsp; {{ _("User settings") }}
+            </a>
             <a class="list-group-item list-group-item-action list-group-item-info" href="{{ get_homepath() }}/admin/{{ course.get_id() }}">
                 <i class="fa fa-user-secret fa-fw"></i>&nbsp; {{ _("Course administration") }}
             </a>
@@ -60,8 +64,11 @@
                 {% if mygroup and user_manager.session_username() in mygroup['students'] %}
                     {{ _("Group : {}").format(mygroup['description']) }}
                 {% else %}
-                    {{ _("Groups management") }}
+                    {{ _("Group management") }}
                 {% endif %}
+            </a>
+            <a class="list-group-item list-group-item-action list-group-item-info" href="{{ get_homepath() }}/user_settings/{{ course.get_id() }}">
+                <i class="fa fa-smile-o fa-fw"></i>&nbsp; {{ _("User settings") }}
             </a>
             {% if course.allow_unregister() %}
                 <a href="#" data-toggle="modal" data-target="#unregister_modal" class="list-group-item list-group-item-action list-group-item-info">
@@ -89,9 +96,9 @@
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb">
             {% if registered %}
-                <li class="breadcrumb-item"><a href="{{ get_homepath() }}/mycourses" title="{{ _('My courses') }}" data-toggle="tooltip" data-placement="bottom"><i class="fa fa-th-list"></i></a></li>
+                <li class="breadcrumb-item"><a href="{{ get_homepath() }}/mycourses" title="{{ _('My courses') }}" data-toggle="tooltip" data-placement="bottom"><i class="fa fa-graduation-cap"></i></a></li>
             {% else %}
-                <li class="breadcrumb-item"><a href="{{get_homepath() }}/courselist" title="{{ _('Course list') }}" data-toggle="tooltip" data-placement="bottom"><i class="fa fa-th-list"></i></a></li>
+                <li class="breadcrumb-item"><a href="{{get_homepath() }}/courselist" title="{{ _('Course list') }}" data-toggle="tooltip" data-placement="bottom"><i class="fa fa-graduation-cap"></i></a></li>
             {% endif %}
             <li class="breadcrumb-item active"><a href="#">{{ course.get_name(user_manager.session_language()) }} <span class="sr-only">{{ _("(current)") }}</span></a></li>
         </ol>
@@ -104,14 +111,12 @@
         <h2>{{ course.get_name(user_manager.session_language()) }}</h2>
     </div>
 
-    {%if tag_filter_list %}
+    {%if category_filter_list %}
         <div class="col-md-4  p-3">
             <select class="form-control input-sm" style="height: 22px; padding: 2px 5px; font-size: 12px; line-height: 1.5;" id="tag_filter" onchange="filter_tag(this)">
-                <option value=""> {{ _("Filter tasks by tags") }}</option>
-                {% for key, tag in tag_filter_list.items() %}
-                    {% if tag.get_type() in [0, 2] and tag.is_visible_for_student() %}
-                        <option value="{{ tag.get_id() }}">{{ tag.get_name(user_manager.session_language()) }}</option>
-                    {% endif %}
+                <option value=""> {{ _("Filter tasks by category") }}</option>
+                {% for category in category_filter_list %}
+                    <option value="{{ category }}">{{ category }}</option>
                 {% endfor %}
             </select>
         </div>
@@ -175,7 +180,7 @@ function filter_tag(tag) {
     }
 </style>
 
-{{ course.get_task_dispenser().render(template_helper, course, tasks_data, tag_filter_list) | safe }}
+{{ course.get_task_dispenser().render(template_helper, course, tasks_data, category_filter_list,user_manager.session_username()) | safe }}
 
 {% include "unregister_modal.html" %}
 

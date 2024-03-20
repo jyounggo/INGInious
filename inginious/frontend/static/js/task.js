@@ -115,7 +115,7 @@ function displayNewSubmission(id)
     
     //If there exists tags, we add a badge with '0' in the new submission.
     if($('span', $('#main_tag_group')).length > 0){
-        submission_link.append('<span class="badge alert-info" id="tag_counter" >0</span>');
+        submission_link.prepend('<span class="badge alert-info" id="tag_counter" >0</span> ');
     }
 
     submissions.prepend(submission_link);
@@ -189,7 +189,6 @@ function displayEvaluatedSubmission(id, fade) {
             $("#my_submission").replaceWith(submission_link);
         }
 
-        $("#share_my_submission").removeClass("hidden");
     }
 
     updateTaskStatus(item.hasClass("list-group-item-success") ? "Succeeded" : "Failed", parseFloat(item.text().split("-")[1]));
@@ -496,7 +495,7 @@ function displayRemoteDebug(submissionid, submission_wait_data)
     var ssh_user = submission_wait_data["ssh_user"];
     var ssh_password = submission_wait_data["ssh_password"];
 
-    var pre_content = "ssh " + ssh_user + "@" + ssh_host + " -p " + ssh_port+ " -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no";
+    var pre_content = "ssh " + ssh_user + "@" + ssh_host + " -p " + ssh_port+ " -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no -o PreferredAuthentications=password";
     var task_alert = $('#task_alert');
     var title = '<i class="fa fa-spinner fa-pulse fa-fw" aria-hidden="true"></i> ';
     var content = submission_wait_data["text"];
@@ -800,14 +799,6 @@ function load_input_match(submissionid, key, input) {
         $(field).prop('value', "");
 }
 
-// Share eval submission result on social networks
-function share_submission(method_id)
-{
-    var submissionid = $('#my_submission').attr('data-submission-id');
-    window.location.replace("/auth/share/" + method_id + "?submissionid=" + submissionid)
-
-}
-
 /*
  * Update tags visual of HTML nodes that represent tags.
  * The choice of the color depends of data present in data["tests"]
@@ -822,7 +813,7 @@ function updateMainTags(data){
         //If this is a alert-danger class, this is an misconception
         if($(this).attr('class') == "badge alert-danger"){
             $(this).hide();
-        }else if($(this).attr('class') == "badge alert-default"){
+        }else if($(this).attr('class') == "badge alert-warning"){
             //Remove auto tags
             $(this).remove();
         }else{
@@ -839,16 +830,17 @@ function updateMainTags(data){
                 if(elem.attr('class') == "badge alert-danger"){
                     elem.show();
                 }else{
+                    elem.show();
                     elem.attr('class', 'badge alert-success')
                 }
             }
             if(tag.startsWith("*auto-tag-")){
                 var max_length = 28;
                 if(data["tests"][tag].length > max_length){
-                    $('#main_tag_group').append('<span class="badge alert-default" data-toggle="tooltip" data-placement="top" data-original-title="'+data["tests"][tag]+'">'+data["tests"][tag].substring(0, max_length)+'…</span>');
+                    $('#main_tag_group').append('<span class="badge alert-warning" data-toggle="tooltip" data-placement="top" data-original-title="'+data["tests"][tag]+'">'+data["tests"][tag].substring(0, max_length)+'…</span>');
                 }
                 else{
-                    $('#main_tag_group').append('<span class="badge alert-default">'+data["tests"][tag]+'</span>');
+                    $('#main_tag_group').append('<span class="badge alert-warning">'+data["tests"][tag]+'</span>');
                 }
             }
         }
@@ -869,24 +861,17 @@ function updateTagsToNewSubmission(elem, data){
     //Get all tags listed in main tag section
     $('span', $('#main_tag_group')).each(function() {
         var id = $(this).attr("id");
-        var color = $(this).attr("class");
-        //Only consider normal tag (we do not consider misconception
-        if(color != "badge alert-danger"){
-            if(id in data && data[id]){
-                n_ok++;
-                tags_ok.push($(this).text());
-            }
-            n_tot++;
+        if(id in data && data[id]){
+            n_ok++;
+            tags_ok.push($(this).text());
         }
+        n_tot++;
     });
     badge.text(n_ok);
-    if(n_tot == n_ok){
-        badge.attr("class", "badge alert-success");
-    }else if(n_ok > 0){
-        badge.attr("data-toggle", "tooltip");
-        badge.attr("data-placement", "left");
-        badge.attr('data-original-title', tags_ok.join(", "));
-    }
+    badge.attr("data-toggle", "tooltip");
+    badge.attr("data-placement", "left");
+    badge.attr('data-original-title', tags_ok.join(", "));
+
 }
 
 /*

@@ -10,6 +10,7 @@ import sys
 import flask
 import pymongo
 import oauthlib
+import gettext
 
 from gridfs import GridFS
 from binascii import hexlify
@@ -17,6 +18,7 @@ from pymongo import MongoClient
 from werkzeug.exceptions import InternalServerError
 
 import inginious.frontend.pages.course_admin.utils as course_admin_utils
+import inginious.frontend.pages.taskset_admin.utils as taskset_admin_utils
 import inginious.frontend.pages.preferences.utils as preferences_utils
 from inginious.frontend.environment_types import register_base_env_types
 from inginious.frontend.arch_helper import create_arch, start_asyncio_and_zmq
@@ -28,11 +30,11 @@ from inginious.frontend.template_helper import TemplateHelper
 from inginious.frontend.user_manager import UserManager
 from inginious.frontend.l10n_manager import L10nManager
 from inginious import get_root_path, __version__, DB_VERSION
-from inginious.frontend.course_factory import create_factories
+from inginious.frontend.taskset_factory import create_factories
 from inginious.common.entrypoints import filesystem_from_config_dict
 from inginious.common.filesystems.local import LocalFSProvider
 from inginious.frontend.lti_outcome_manager import LTIOutcomeManager
-from inginious.frontend.task_problems import *
+from inginious.frontend.task_problems import get_default_displayable_problem_types
 from inginious.frontend.task_dispensers.toc import TableOfContents
 from inginious.frontend.task_dispensers.combinatory_test import CombinatoryTest
 from inginious.frontend.flask.mapping import init_flask_mapping, init_flask_maintenance_mapping
@@ -135,18 +137,19 @@ def get_app(config):
     # Init database if needed
     db_version = database.db_version.find_one({})
     if db_version is None:
-        database.submissions.ensure_index([("username", pymongo.ASCENDING)])
-        database.submissions.ensure_index([("courseid", pymongo.ASCENDING)])
-        database.submissions.ensure_index([("courseid", pymongo.ASCENDING), ("taskid", pymongo.ASCENDING)])
-        database.submissions.ensure_index([("submitted_on", pymongo.DESCENDING)])  # sort speed
-        database.user_tasks.ensure_index(
+        database.submissions.create_index([("username", pymongo.ASCENDING)])
+        database.submissions.create_index([("courseid", pymongo.ASCENDING)])
+        database.submissions.create_index([("courseid", pymongo.ASCENDING), ("taskid", pymongo.ASCENDING)])
+        database.submissions.create_index([("submitted_on", pymongo.DESCENDING)])  # sort speed
+        database.submissions.create_index([("status", pymongo.ASCENDING)]) # update_pending_jobs speedup
+        database.user_tasks.create_index(
             [("username", pymongo.ASCENDING), ("courseid", pymongo.ASCENDING), ("taskid", pymongo.ASCENDING)],
             unique=True)
-        database.user_tasks.ensure_index([("username", pymongo.ASCENDING), ("courseid", pymongo.ASCENDING)])
-        database.user_tasks.ensure_index([("courseid", pymongo.ASCENDING), ("taskid", pymongo.ASCENDING)])
-        database.user_tasks.ensure_index([("courseid", pymongo.ASCENDING)])
-        database.user_tasks.ensure_index([("username", pymongo.ASCENDING)])
-        database.db_version.insert({"db_version": DB_VERSION})
+        database.user_tasks.create_index([("username", pymongo.ASCENDING), ("courseid", pymongo.ASCENDING)])
+        database.user_tasks.create_index([("courseid", pymongo.ASCENDING), ("taskid", pymongo.ASCENDING)])
+        database.user_tasks.create_index([("courseid", pymongo.ASCENDING)])
+        database.user_tasks.create_index([("username", pymongo.ASCENDING)])
+        database.db_version.insert_one({"db_version": DB_VERSION})
     elif db_version.get("db_version", 0) != DB_VERSION:
         raise Exception("Please update the database before running INGInious")
 
@@ -160,13 +163,15 @@ def get_app(config):
 
     # Init gettext
     available_translations = {
-        "fr": "Français",
-        "es": "Español",
-        "pt": "Português",
+        "de": "Deutsch",
         "el": "ελληνικά",
-        "vi": "Tiếng Việt",
+        "es": "Español",
+        "fr": "Français",
+        "he": "עִבְרִית",
         "nl": "Nederlands",
-        "de": "Deutsch"
+        "nb_NO": "Norsk (bokmål)",
+        "pt": "Português",
+        "vi": "Tiếng Việt"
     }
 
     available_languages = {"en": "English"}
@@ -212,26 +217,19 @@ def get_app(config):
         task_dispenser.get_id(): task_dispenser for task_dispenser in [TableOfContents, CombinatoryTest]
     }
 
-    default_problem_types = {
-        problem_type.get_type(): problem_type for problem_type in [DisplayableCodeProblem,
-                                                                   DisplayableCodeSingleLineProblem,
-                                                                   DisplayableFileProblem,
-                                                                   DisplayableMultipleChoiceProblem,
-                                                                   DisplayableMatchProblem]
-    }
+    default_problem_types = get_default_displayable_problem_types()
 
-    course_factory, task_factory = create_factories(fs_provider, default_task_dispensers, default_problem_types, plugin_manager)
+    taskset_factory, course_factory, task_factory = create_factories(fs_provider, default_task_dispensers, default_problem_types, plugin_manager, database)
 
     user_manager = UserManager(database, config.get('superadmins', []))
 
     update_pending_jobs(database)
 
-    client = create_arch(config, fs_provider, zmq_context, course_factory)
+    client = create_arch(config, fs_provider, zmq_context, taskset_factory)
 
     lti_outcome_manager = LTIOutcomeManager(database, user_manager, course_factory)
 
     submission_manager = WebAppSubmissionManager(client, user_manager, database, gridfs, plugin_manager, lti_outcome_manager)
-
     template_helper = TemplateHelper(plugin_manager, user_manager, config.get('use_minified_js', True))
 
     register_utils(database, user_manager, template_helper)
@@ -257,6 +255,9 @@ def get_app(config):
     template_helper.add_other("course_admin_menu",
                               lambda course, current: course_admin_utils.get_menu(course, current, template_helper.render,
                                                                                   plugin_manager, user_manager))
+    template_helper.add_other("taskset_admin_menu",
+                              lambda taskset, current: taskset_admin_utils.get_menu(taskset, current, template_helper.render,
+                                                                                  user_manager))
     template_helper.add_other("preferences_menu",
                               lambda current: preferences_utils.get_menu(config.get("allow_deletion", True),
                                                                          current, template_helper.render,
@@ -284,6 +285,7 @@ def get_app(config):
     # Insert the needed singletons into the application, to allow pages to call them
     flask_app.get_homepath = get_homepath
     flask_app.plugin_manager = plugin_manager
+    flask_app.taskset_factory = taskset_factory
     flask_app.course_factory = course_factory
     flask_app.task_factory = task_factory
     flask_app.submission_manager = submission_manager

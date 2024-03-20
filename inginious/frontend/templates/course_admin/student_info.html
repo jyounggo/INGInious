@@ -14,6 +14,7 @@
 {% block navbar %}
     <nav aria-label="breadcrumb">
         <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="{{ get_homepath() }}/mycourses" title="{{ _('My courses') }}" data-toggle="tooltip" data-placement="bottom"><i class="fa fa-graduation-cap"></i></a></li>
             <li class="breadcrumb-item"><a href="{{get_homepath()}}/course/{{course.get_id()}}">{{course.get_name(user_manager.session_language())}}</a></li>
             <li class="breadcrumb-item"><a href="{{get_homepath()}}/admin/{{course.get_id()}}" title="{{ _('Administration') }}" data-toggle="tooltip" data-placement="bottom">
                 <i class="fa fa-user-secret"></i></a></li>
@@ -103,7 +104,7 @@
                 </div>
                 <div class="modal-footer">
                     <input type="hidden" name="taskid" id="taskid">
-                    <button type="button" class="btn btn-default" data-dismiss="modal">{{ _("Cancel") }}</button>
+                    <button type="button" class="btn btn-secondary" data-dismiss="modal">{{ _("Cancel") }}</button>
                     <button type="submit" name="reset" class="btn btn-danger">{{ _("Reset") }}</button>
                 </div>
             </div>
@@ -115,7 +116,7 @@
       $('.modal-dialog .taskname').each(function (index) {
           $(this).text($(event.relatedTarget).data('task'));
       });
-      $('.modal-dialog #taskname').val($(event.relatedTarget).data('task_id'));
+      $('.modal-dialog #taskid').val($(event.relatedTarget).data('task_id'));
     });
     $(".reset_modal").each(function(index) {
         $(this).tooltip({"placement": "bottom"});

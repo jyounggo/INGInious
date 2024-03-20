@@ -3,17 +3,36 @@
 # This file is part of INGInious. See the LICENSE and the COPYRIGHTS files for
 # more information about the licensing of this file.
 
-""" Displyable problems """
+""" Displayable problems """
 
-import gettext
-import json
 from abc import ABCMeta, abstractmethod
 from random import Random
+import gettext
+import json
 
 from inginious.common.tasks_problems import Problem, CodeProblem, CodeSingleLineProblem, \
-    MatchProblem, MultipleChoiceProblem, FileProblem
+    MatchProblem, MultipleChoiceProblem, FileProblem,  _get_problem_types
+
 
 from inginious.frontend.parsable_text import ParsableText
+
+
+def get_displayable_problem_types(name: str) -> dict:
+    """ Get the mapping of DisplayableProblem types available by inspecting a given module.
+
+        :param  name:   The name of the module to inspect.
+        :return:        The mapping of problem name and problem class.
+    """
+    raw = _get_problem_types(name, DisplayableProblem)
+    return {pbl_name: pbl_cls for pbl_name, pbl_cls in raw.items() if pbl_name is not None}
+
+def get_default_displayable_problem_types() -> dict:
+    """ Get the mapping of default DisplayableProblem types available by inspecting the current 
+        module.
+
+        :return:    The mapping of problem name and problem class.
+    """
+    return get_displayable_problem_types(__name__)
 
 
 class DisplayableProblem(Problem, metaclass=ABCMeta):
@@ -50,6 +69,7 @@ class DisplayableCodeProblem(CodeProblem, DisplayableProblem):
 
     def __init__(self, problemid, content, translations, taskfs):
         super(DisplayableCodeProblem, self).__init__(problemid, content, translations, taskfs)
+        self._first_line = content.get("offset", 1)
 
     @classmethod
     def get_type_name(cls, language):
@@ -63,12 +83,12 @@ class DisplayableCodeProblem(CodeProblem, DisplayableProblem):
         header = ParsableText(self.gettext(language,self._header), "rst",
                               translation=self.get_translation_obj(language))
         return template_helper.render("tasks/code.html", inputId=self.get_id(), header=header,
-                                      lines=8, maxChars=0, language=self._language, optional=self._optional,
+                                      lines=8, first_line=self._first_line, maxChars=0, language=self._language, optional=self._optional,
                                       default=self._default)
 
     @classmethod
     def show_editbox(cls, template_helper, key, language):
-        return template_helper.render("course_admin/subproblems/code.html", key=key, multiline=True)
+        return template_helper.render("taskset_admin/subproblems/code.html", key=key, multiline=True)
 
     @classmethod
     def show_editbox_templates(cls, template_helper, key, language):
@@ -97,7 +117,7 @@ class DisplayableCodeSingleLineProblem(CodeSingleLineProblem, DisplayableProblem
 
     @classmethod
     def show_editbox(cls, template_helper, key, language):
-        return template_helper.render("course_admin/subproblems/code.html", key=key, multiline=False)
+        return template_helper.render("taskset_admin/subproblems/code.html", key=key, multiline=False)
 
     @classmethod
     def show_editbox_templates(cls, template_helper, key, language):
@@ -124,7 +144,7 @@ class DisplayableFileProblem(FileProblem, DisplayableProblem):
 
     @classmethod
     def show_editbox(cls, template_helper, key, language):
-        return template_helper.render("course_admin/subproblems/file.html", key=key)
+        return template_helper.render("taskset_admin/subproblems/file.html", key=key)
 
     def show_input(self, template_helper, language, seed):
         """ Show FileBox """
@@ -160,7 +180,8 @@ class DisplayableMultipleChoiceProblem(MultipleChoiceProblem, DisplayableProblem
         # Ensure that the choices are random
         # we *do* need to copy the choices here
         random_order_choices = list(self._choices)
-        rand.shuffle(random_order_choices)
+        if not self._unshuffle:
+            rand.shuffle(random_order_choices)
 
         if self._multiple:
             # take only the valid choices in the first pass
@@ -185,12 +206,12 @@ class DisplayableMultipleChoiceProblem(MultipleChoiceProblem, DisplayableProblem
                 if entry['valid'] and limit > 0:
                     choices.append(entry)
                     limit = limit - 1
-
-        rand.shuffle(choices)
-
+        if not self._unshuffle:
+            rand.shuffle(choices)
+        else:
+            choices = sorted(choices, key=lambda k: k['index'])
         header = ParsableText(self.gettext(language, self._header), "rst",
                               translation=self.get_translation_obj(language))
-
         return template_helper.render("tasks/multiple_choice.html", pid=self.get_id(), header=header,
                                       checkbox=self._multiple, choices=choices,
                                       func=lambda text: ParsableText(
@@ -200,11 +221,11 @@ class DisplayableMultipleChoiceProblem(MultipleChoiceProblem, DisplayableProblem
 
     @classmethod
     def show_editbox(cls, template_helper, key, language):
-        return template_helper.render("course_admin/subproblems/multiple_choice.html", key=key)
+        return template_helper.render("taskset_admin/subproblems/multiple_choice.html", key=key)
 
     @classmethod
     def show_editbox_templates(cls, template_helper, key, language):
-        return template_helper.render("course_admin/subproblems/multiple_choice_templates.html", key=key)
+        return template_helper.render("taskset_admin/subproblems/multiple_choice_templates.html", key=key)
 
 
 class DisplayableMatchProblem(MatchProblem, DisplayableProblem):
@@ -225,7 +246,7 @@ class DisplayableMatchProblem(MatchProblem, DisplayableProblem):
 
     @classmethod
     def show_editbox(cls, template_helper, key, language):
-        return template_helper.render("course_admin/subproblems/match.html", key=key)
+        return template_helper.render("taskset_admin/subproblems/match.html", key=key)
 
     @classmethod
     def show_editbox_templates(cls, template_helper, key, language):

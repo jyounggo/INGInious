@@ -48,7 +48,7 @@ class SAMLAuthMethod(AuthMethod):
         else:
             return '<i class="fa fa-id-card" style="font-size:50px; color:#000000;"></i>'
 
-    def get_auth_link(self, auth_storage, share=False):
+    def get_auth_link(self, auth_storage):
         auth = OneLogin_Saml2_Auth(prepare_request(self._settings), self._settings)
         return auth.login(json.dumps(auth_storage))
 
@@ -124,12 +124,6 @@ class SAMLAuthMethod(AuthMethod):
                                                                          ", ".join(errors))
             return None
 
-    def share(self, auth_storage, course, task, submission, language):
-        return False
-
-    def allow_share(self):
-        return False
-
     def get_settings(self):
         return self._settings
 
@@ -171,7 +165,7 @@ class MetadataPage(INGIniousPage):
             raise InternalServerError(description=', '.join(errors))
 
 
-def init(plugin_manager, course_factory, client, conf):
+def init(plugin_manager, taskset_factory, client, conf):
     plugin_manager.add_page('/auth/<id>/metadata', MetadataPage.as_view('metadatapage_' + conf.get("id")))
     plugin_manager.register_auth_method(SAMLAuthMethod(conf.get("id"), conf.get('name', 'SAML'), conf.get('imlink', ''), conf))
 

@@ -13,6 +13,7 @@ Installation, configuration and upgrade
     admin_doc/install_doc/static_pages
     admin_doc/install_doc/troubleshooting
     admin_doc/install_doc/other_oci_runtimes_support
+    admin_doc/install_doc/create_container
 
 Commands reference
 ------------------
@@ -47,3 +48,5 @@ Utilities
     admin_doc/commands_doc/inginious-synchronize
     admin_doc/commands_doc/inginious-container-update
     admin_doc/commands_doc/inginious-database-update
+    admin_doc/commands_doc/inginious-task-test
+    admin_doc/commands_doc/inginious-submission-anonymizer

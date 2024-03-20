@@ -10,12 +10,11 @@ import os
 import flask
 
 from requests_oauthlib import OAuth2Session
-from requests_oauthlib.compliance_fixes import linkedin_compliance_fix
 
 from inginious.frontend.user_manager import AuthMethod
 
-authorization_base_url = 'https://www.linkedin.com/uas/oauth2/authorization'
-token_url = 'https://www.linkedin.com/uas/oauth2/accessToken'
+authorization_base_url = 'https://www.linkedin.com/oauth/v2/authorization'
+token_url = 'https://www.linkedin.com/oauth/v2/accessToken'
 scope = ["r_liteprofile", "r_emailaddress"]
 
 
@@ -23,9 +22,8 @@ class LinkedInAuthMethod(AuthMethod):
     """
     LinkedIn auth method
     """
-    def get_auth_link(self, auth_storage, share=False):
-        linkedin = OAuth2Session(self._client_id, scope=scope + (["w_share"] if share else []), redirect_uri=flask.request.url_root + self._callback_page)
-        linkedin = linkedin_compliance_fix(linkedin)
+    def get_auth_link(self, auth_storage):
+        linkedin = OAuth2Session(self._client_id, scope=scope, redirect_uri=flask.request.url_root + self._callback_page)
         authorization_url, state = linkedin.authorization_url(authorization_base_url)
         auth_storage["oauth_state"] = state
         return authorization_url
@@ -38,7 +36,7 @@ class LinkedInAuthMethod(AuthMethod):
             r = linkedin.get('https://api.linkedin.com/v2/me?projection=(id,localizedFirstName,localizedLastName)')
             profile = json.loads(r.content.decode('utf-8'))
             r = linkedin.get('https://api.linkedin.com/v2/clientAwareMemberHandles?q=members&projection=(elements*(primary,type,handle~))')
-            result  = json.loads(r.content.decode('utf-8'))
+            result = json.loads(r.content.decode('utf-8'))
             for contact in result["elements"]:
                 if contact["type"] == "EMAIL":
                     profile["emailAddress"] = contact["handle~"]["emailAddress"]
@@ -46,12 +44,6 @@ class LinkedInAuthMethod(AuthMethod):
             return str(profile["id"]), profile["localizedFirstName"] + " " + profile["localizedLastName"], profile["emailAddress"], {}
         except Exception as e:
             return None
-
-    def share(self, auth_storage, course, task, submission, language):
-        return False
-
-    def allow_share(self):
-        return False
 
     def get_id(self):
         return self._id
@@ -70,7 +62,7 @@ class LinkedInAuthMethod(AuthMethod):
         return '<i class="fa fa-linkedin-square" style="font-size:50px; color:#008CC9;"></i>'
 
 
-def init(plugin_manager, course_factory, client, conf):
+def init(plugin_manager, taskset_factory, client, conf):
 
     if conf.get("debug", False):
         os.environ['OAUTHLIB_INSECURE_TRANSPORT'] = '1'

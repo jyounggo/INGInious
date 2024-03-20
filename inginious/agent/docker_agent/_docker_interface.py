@@ -13,6 +13,8 @@ from typing import List, Tuple, Dict
 import docker
 import logging
 
+from docker.types import Ulimit
+
 from inginious.agent.docker_agent._docker_runtime import DockerRuntime
 
 DOCKER_AGENT_VERSION = 3
@@ -55,26 +57,30 @@ class DockerInterface(object):  # pragma: no cover
             title = None
             try:
                 title = x.labels["org.inginious.grading.name"]
-                created = datetime.strptime(x.attrs['Created'][:-4], "%Y-%m-%dT%H:%M:%S.%f").timestamp()
+                created = x.history()[0]['Created']
                 ports = [int(y) for y in x.labels["org.inginious.grading.ports"].split(
                     ",")] if "org.inginious.grading.ports" in x.labels else []
 
                 for docker_runtime in runtimes:
-                    if docker_runtime.run_as_root or "org.inginious.grading.need_root" not in x.labels:
-                        logger.info("Envtype %s (%s) can use container %s", docker_runtime.envtype, docker_runtime.runtime, title)
-                        if x.labels.get("org.inginious.grading.agent_version") != str(DOCKER_AGENT_VERSION):
-                            logger.warning(
-                                "Container %s is made for an old/newer version of the agent (container version is "
-                                "%s, but it should be %i). INGInious will ignore the container.", title,
-                                str(x.labels.get("org.inginious.grading.agent_version")), DOCKER_AGENT_VERSION)
-                            continue
+                    if "org.inginious.grading.need_root" in x.labels and not docker_runtime.run_as_root:
+                        continue
+                    if "org.inginious.grading.need_gpu" in x.labels and not docker_runtime.enables_gpu:
+                        continue
 
-                        images[docker_runtime.envtype][x.attrs['Id']] = {
-                            "title": title,
-                            "created": created,
-                            "ports": ports,
-                            "runtime": docker_runtime.runtime
-                        }
+                    logger.info("Envtype %s (%s) can use container %s", docker_runtime.envtype, docker_runtime.runtime, title)
+                    if x.labels.get("org.inginious.grading.agent_version") != str(DOCKER_AGENT_VERSION):
+                        logger.warning(
+                            "Container %s is made for an old/newer version of the agent (container version is "
+                            "%s, but it should be %i). INGInious will ignore the container.", title,
+                            str(x.labels.get("org.inginious.grading.agent_version")), DOCKER_AGENT_VERSION)
+                        continue
+
+                    images[docker_runtime.envtype][x.attrs['Id']] = {
+                        "title": title,
+                        "created": created,
+                        "ports": ports,
+                        "runtime": docker_runtime.runtime
+                    }
             except:
                 logging.getLogger("inginious.agent").exception("Container %s is badly formatted", title or "[cannot load title]")
 
@@ -104,7 +110,7 @@ class DockerInterface(object):  # pragma: no cover
             return None
 
     def create_container(self, image, network_grading, mem_limit, task_path, sockets_path,
-                         course_common_path, course_common_student_path, runtime: str, ports=None):
+                         taskset_common_path, taskset_common_student_path, fd_limit, runtime: str, ports=None):
         """
         Creates a container.
         :param image: env to start (name/id of a docker image)
@@ -112,18 +118,21 @@ class DockerInterface(object):  # pragma: no cover
         :param mem_limit: in Mo
         :param task_path: path to the task directory that will be mounted in the container
         :param sockets_path: path to the socket directory that will be mounted in the container
-        :param course_common_path:
-        :param course_common_student_path:
+        :param taskset_common_path:
+        :param taskset_common_student_path:
+        :param fd_limit: Tuple with soft and hard limits per slot for FS
         :param runtime: name of the docker runtime to use
         :param ports: dictionary in the form {docker_port: external_port}
         :return: the container id
         """
         task_path = os.path.abspath(task_path)
         sockets_path = os.path.abspath(sockets_path)
-        course_common_path = os.path.abspath(course_common_path)
-        course_common_student_path = os.path.abspath(course_common_student_path)
+        taskset_common_path = os.path.abspath(taskset_common_path)
+        taskset_common_student_path = os.path.abspath(taskset_common_student_path)
         if ports is None:
             ports = {}
+
+        nofile_limit = Ulimit(name='nofile', soft=fd_limit[0], hard=fd_limit[1])
 
         response = self._docker.containers.create(
             image,
@@ -137,25 +146,27 @@ class DockerInterface(object):  # pragma: no cover
             volumes={
                 task_path: {'bind': '/task'},
                 sockets_path: {'bind': '/sockets'},
-                course_common_path: {'bind': '/course/common', 'mode': 'ro'},
-                course_common_student_path: {'bind': '/course/common/student', 'mode': 'ro'}
+                taskset_common_path: {'bind': '/course/common', 'mode': 'ro'},
+                taskset_common_student_path: {'bind': '/course/common/student', 'mode': 'ro'}
             },
-            runtime=runtime
+            runtime=runtime,
+            ulimits=[nofile_limit]
         )
         return response.id
 
     def create_container_student(self, runtime: str, image: str, mem_limit, student_path,
-                                 socket_path, systemfiles_path, course_common_student_path,
-                                 share_network_of_container: str=None, ports=None):
+                                 socket_path, systemfiles_path, taskset_common_student_path,
+                                 parent_runtime: str,fd_limit, share_network_of_container: str=None, ports=None):
         """
         Creates a student container
+        :param fd_limit:Tuple with soft and hard limits per slot for FS
         :param runtime: name of the docker runtime to use
         :param image: env to start (name/id of a docker image)
         :param mem_limit: in Mo
         :param student_path: path to the task directory that will be mounted in the container
         :param socket_path: path to the socket that will be mounted in the container
         :param systemfiles_path: path to the systemfiles folder containing files that can override partially some defined system files
-        :param course_common_student_path:
+        :param taskset_common_student_path:
         :param share_network_of_container: (deprecated) if a container id is given, the new container will share its
                                            network stack.
         :param ports: dictionary in the form {docker_port: external_port}
@@ -164,7 +175,8 @@ class DockerInterface(object):  # pragma: no cover
         student_path = os.path.abspath(student_path)
         socket_path = os.path.abspath(socket_path)
         systemfiles_path = os.path.abspath(systemfiles_path)
-        course_common_student_path = os.path.abspath(course_common_student_path)
+        taskset_common_student_path = os.path.abspath(taskset_common_student_path)
+        secured_scripts_path = student_path+"/scripts"
 
         if ports is None:
             ports = {}
@@ -176,10 +188,12 @@ class DockerInterface(object):  # pragma: no cover
         else:
             net_mode = 'container:' + share_network_of_container
 
+        nofile_limit = Ulimit(name='nofile', soft=fd_limit[0], hard=fd_limit[1])
+
         response = self._docker.containers.create(
             image,
             stdin_open=True,
-            command="_run_student_intern "+runtime,  # the script takes the runtime as argument
+            command="_run_student_intern "+runtime + " " + parent_runtime,  # the script takes the runtimes as arguments
             mem_limit=str(mem_limit) + "M",
             memswap_limit=str(mem_limit) + "M",
             mem_swappiness=0,
@@ -188,11 +202,13 @@ class DockerInterface(object):  # pragma: no cover
             ports=ports,
             volumes={
                 student_path: {'bind': '/task/student'},
+                secured_scripts_path: {'bind': '/task/student/scripts'},
                 socket_path: {'bind': '/__parent.sock'},
                 systemfiles_path: {'bind': '/task/systemfiles', 'mode': 'ro'},
-                course_common_student_path: {'bind': '/course/common/student', 'mode': 'ro'}
+                taskset_common_student_path: {'bind': '/course/common/student', 'mode': 'ro'}
             },
-            runtime=runtime
+            runtime=runtime,
+            ulimits=[nofile_limit]
         )
 
         return response.id

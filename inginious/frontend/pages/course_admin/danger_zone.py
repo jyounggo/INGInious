@@ -5,22 +5,24 @@
 
 import datetime
 import glob
-import hashlib
 import logging
 import os
 import random
 import zipfile
+
 import bson.json_util
 import flask
-
 from flask import redirect, Response
 from werkzeug.exceptions import NotFound
+
+
 from inginious.frontend.pages.course_admin.utils import INGIniousAdminPage
+from inginious.frontend.user_manager import UserManager
 
 
 class CourseDangerZonePage(INGIniousAdminPage):
     """ Course administration page: list of audiences """
-    _logger = logging.getLogger("inginious.webapp.danger_zone")
+    _logger = logging.getLogger("inginious.webapp.course.danger_zone")
 
     def wipe_course(self, courseid):
         submissions = self.database.submissions.find({"courseid": courseid})
@@ -31,10 +33,10 @@ class CourseDangerZonePage(INGIniousAdminPage):
                     gridfs.delete(submission[key])
 
         self.database.courses.update_one({"_id": courseid}, {"$set": {"students": []}})
-        self.database.audiences.remove({"courseid": courseid})
-        self.database.groups.remove({"courseid": courseid})
-        self.database.user_tasks.remove({"courseid": courseid})
-        self.database.submissions.remove({"courseid": courseid})
+        self.database.audiences.delete_many({"courseid": courseid})
+        self.database.groups.delete_many({"courseid": courseid})
+        self.database.user_tasks.delete_many({"courseid": courseid})
+        self.database.submissions.delete_many({"courseid": courseid})
 
         self._logger.info("Course %s wiped.", courseid)
 
@@ -94,15 +96,15 @@ class CourseDangerZonePage(INGIniousAdminPage):
 
             audiences = bson.json_util.loads(zipf.read("audiences.json").decode("utf-8"))
             if len(audiences) > 0:
-                self.database.audiences.insert(audiences)
+                self.database.audiences.insert_many(audiences)
 
             groups = bson.json_util.loads(zipf.read("groups.json").decode("utf-8"))
             if len(groups) > 0:
-                self.database.groups.insert(groups)
+                self.database.groups.insert_many(groups)
 
             user_tasks = bson.json_util.loads(zipf.read("user_tasks.json").decode("utf-8"))
             if len(user_tasks) > 0:
-                self.database.user_tasks.insert(user_tasks)
+                self.database.user_tasks.insert_many(user_tasks)
 
             submissions = bson.json_util.loads(zipf.read("submissions.json").decode("utf-8"))
             for submission in submissions:
@@ -111,7 +113,7 @@ class CourseDangerZonePage(INGIniousAdminPage):
                         submission[key] = self.submission_manager.get_gridfs().put(zipf.read(key + "/" + str(submission[key]) + ".data"))
 
             if len(submissions) > 0:
-                self.database.submissions.insert(submissions)
+                self.database.submissions.insert_many(submissions)
 
         self._logger.info("Course %s restored from backup directory.", courseid)
 
@@ -133,7 +135,7 @@ class CourseDangerZonePage(INGIniousAdminPage):
 
     def GET_AUTH(self, courseid):  # pylint: disable=arguments-differ
         """ GET request """
-        course, __ = self.get_course_and_check_rights(courseid, allow_all_staff=False)
+        course, __ = self.get_course_and_check_rights(courseid)
 
         data = flask.request.args
 
@@ -152,7 +154,7 @@ class CourseDangerZonePage(INGIniousAdminPage):
 
     def POST_AUTH(self, courseid):  # pylint: disable=arguments-differ
         """ POST request """
-        course, __ = self.get_course_and_check_rights(courseid, allow_all_staff=False)
+        course, __ = self.get_course_and_check_rights(courseid)
 
         msg = ""
         error = False
@@ -215,7 +217,7 @@ class CourseDangerZonePage(INGIniousAdminPage):
 
     def page(self, course, msg="", error=False):
         """ Get all data and display the page """
-        thehash = hashlib.sha512(str(random.getrandbits(256)).encode("utf-8")).hexdigest()
+        thehash = UserManager.hash_password_sha512(str(random.getrandbits(256)))
         self.user_manager.set_session_token(thehash)
 
         backups = self.get_backup_list(course)

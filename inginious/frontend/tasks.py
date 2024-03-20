@@ -29,16 +29,15 @@ def _migrate_from_v_0_6(content):
 class Task(object):
     """ A task that stores additional context information, specific to the web app """
 
-    def __init__(self, course, taskid, content, filesystem, plugin_manager, task_problem_types):
+    def __init__(self, taskset, taskid, content, plugin_manager, task_problem_types):
         # We load the descriptor of the task here to allow plugins to modify settings of the task before it is read by the Task constructor
         if not id_checker(taskid):
-            raise Exception("Task with invalid id: " + course.get_id() + "/" + taskid)
+            raise Exception("Task with invalid id: " + taskset.get_id() + "/" + taskid)
 
         content = _migrate_from_v_0_6(content)
 
-        self._course = course
+        self._taskset = taskset
         self._taskid = taskid
-        self._fs = filesystem
         self._plugin_manager = plugin_manager
         self._data = content
 
@@ -47,9 +46,9 @@ class Task(object):
 
         # i18n
         self._translations = {}
-        self._course_fs = self._fs.from_subfolder(course.get_id())
-        self._course_fs.ensure_exists()
-        self._task_fs = self._course_fs.from_subfolder(taskid)
+        self._taskset_fs = taskset.get_fs()
+        self._taskset_fs.ensure_exists()
+        self._task_fs = self._taskset_fs.from_subfolder(taskid)
         self._task_fs.ensure_exists()
 
         self._translations_fs = self._task_fs.from_subfolder("$i18n")
@@ -57,9 +56,9 @@ class Task(object):
         if not self._translations_fs.exists():
             self._translations_fs = self._task_fs.from_subfolder("student").from_subfolder("$i18n")
         if not self._translations_fs.exists():
-            self._translations_fs = self._course_fs.from_subfolder("$common").from_subfolder("$i18n")
+            self._translations_fs = self._taskset_fs.from_subfolder("$common").from_subfolder("$i18n")
         if not self._translations_fs.exists():
-            self._translations_fs = self._course_fs.from_subfolder("$common").from_subfolder(
+            self._translations_fs = self._taskset_fs.from_subfolder("$common").from_subfolder(
                 "student").from_subfolder("$i18n")
 
         if self._translations_fs.exists():
@@ -103,23 +102,8 @@ class Task(object):
         else:
             self._contact_url = ""
 
-        # Submission storage
-        self._stored_submissions = int(self._data.get("stored_submissions", 0))
-
-        # Default download
-        self._evaluate = self._data.get("evaluate", "best")
-
-        # Grade weight
-        self._weight = float(self._data.get("weight", 1.0))
-
         # _accessible
         self._accessible = AccessibleTime(self._data.get("accessible", None))
-
-        # Group task
-        self._groups = bool(self._data.get("groups", False))
-
-        # Submission limits
-        self._submission_limit = self._data.get("submission_limit", {"amount": -1, "period": -1})
         
         # Input random
         self._input_random = int(self._data.get("input_random", 0))
@@ -127,14 +111,11 @@ class Task(object):
         # Regenerate input random
         self._regenerate_input_random = bool(self._data.get("regenerate_input_random", False))
 
-        # Category tags
-        self._categories = self._data.get("categories", [])
-
     def get_translation_obj(self, language):
         return self._translations.get(language, gettext.NullTranslations())
 
-    def gettext(self, language, *args, **kwargs):
-        return self.get_translation_obj(language).gettext(*args, **kwargs)
+    def gettext(self, language, text):
+        return self.get_translation_obj(language).gettext(text) if text else ""
 
     def input_is_consistent(self, task_input, default_allowed_extension, default_max_size):
         """ Check if an input for a task is consistent. Return true if this is case, false else """
@@ -162,14 +143,6 @@ class Task(object):
     def get_problems_dict(self):
         """ Get problems dict contained in this task """
         return self._data["problems"]
-
-    def get_course_id(self):
-        """ Return the courseid of the course that contains this task """
-        return self._course.get_id()
-
-    def get_course(self):
-        """ Return the course that contains this task """
-        return self._course
 
     def get_environment_parameters(self):
         """ Returns the raw environment parameters, which is a dictionnary that is envtype dependent. """
@@ -201,33 +174,6 @@ class Task(object):
 
         return task_problem_types.get(problem_content.get('type', ""))(problemid, problem_content, self._translations, self._task_fs)
 
-    def get_grading_weight(self):
-        """ Get the relative weight of this task in the grading """
-        return self._weight
-
-    def get_accessible_time(self, plugin_override=True):
-        """  Get the accessible time of this task """
-        vals = self._plugin_manager.call_hook('task_accessibility', course=self.get_course(), task=self, default=self._accessible)
-        return vals[0] if len(vals) and plugin_override else self._accessible
-
-    def get_deadline(self):
-        """ Returns a string containing the deadline for this task """
-        if self.get_accessible_time().is_always_accessible():
-            return _("No deadline")
-        elif self.get_accessible_time().is_never_accessible():
-            return _("It's too late")
-        else:
-            # Prefer to show the soft deadline rather than the hard one
-            return self.get_accessible_time().get_soft_end_date().strftime("%d/%m/%Y %H:%M:%S")
-
-    def is_group_task(self):
-        """ Indicates if the task submission mode is per groups """
-        return self._groups
-
-    def get_submission_limit(self):
-        """ Returns the submission limits et for the task"""
-        return self._submission_limit
-
     def get_name(self, language):
         """ Returns the name of this task """
         return self.gettext(language, self._name) if self._name else ""
@@ -235,7 +181,7 @@ class Task(object):
     def get_context(self, language):
         """ Get the context(description) of this task """
         context = self.gettext(language, self._context) if self._context else ""
-        vals = self._plugin_manager.call_hook('task_context', course=self.get_course(), task=self, default=context)
+        vals = self._plugin_manager.call_hook('task_context', task=self, default=context)
         return ParsableText(vals[0], "rst", translation=self.get_translation_obj(language)) if len(vals) \
             else ParsableText(context, "rst", translation=self.get_translation_obj(language))
 
@@ -252,18 +198,6 @@ class Task(object):
         for problem in self._problems:
             input_data = problem.adapt_input_for_backend(input_data)
         return input_data
-
-    def get_stored_submissions(self):
-        """ Indicates if only the last submission must be stored for the task """
-        return self._stored_submissions
-
-    def get_evaluate(self):
-        """ Indicates the default download for the task """
-        return self._evaluate
-
-    def get_categories(self):
-        """ Returns the tags id associated to the task """
-        return [category for category in self._categories if category in self._course.get_tags()]
         
     def get_number_input_random(self):
         """ Return the number of random inputs """
@@ -272,3 +206,7 @@ class Task(object):
     def regenerate_input_random(self):
         """ Indicates if random inputs should be regenerated """
         return self._regenerate_input_random
+
+    def get_dispenser_settings(self, fields):
+        """ Fetch the legacy config fields now used by task dispensers """
+        return {field_class.get_id(): field_class.get_value({field_class.get_id(): self._data[field]}) for field, field_class in fields.items() if field in self._data}
