@@ -1,1 +1,1 @@
-docker build -t csr.csel.io/inginious/inginious:v0.8.7 .
+docker build -t csr.csel.io/inginious/inginious .
