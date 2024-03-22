@@ -3,65 +3,68 @@ services:
     image: mongo:6.0.2
     networks:
       - inginious
+    volumes:
+      - ./mongodb:/data/db
+      - /home/jipa4409/dump:/mnt/mongo/dump
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+
   backend:
-    image: ${REGISTRY}/inginious/core-backend:${VERSION}
-    environment:
-      AGENT: "tcp://0.0.0.0:2001"
-      CLIENT: "tcp://0.0.0.0:2000"
+    image: csr.csel.io/inginious/inginious:v0.8.7
+    command: inginious-backend tcp://0.0.0.0:2001 tcp://0.0.0.0:2000
+    depends_on:
+      - db
     networks:
       - inginious
 
   agent-docker:
-    image: ${REGISTRY}/inginious/core-agent_docker:${VERSION}
+    image: csr.csel.io/inginious/inginious:v0.8.7
     depends_on:
       - backend
     deploy:
       replicas: 1
-    environment:
-      BACKEND: "tcp://backend:2001"
+    command: inginious-agent-docker tcp://backend:2001 --tmpdir=/tmp/agent_data/ --debug-host inginious-node-01.cs.colorado.edu
     volumes:
      - /var/run/docker.sock:/var/run/docker.sock
      # See https://github.com/UCL-INGI/INGInious/issues/352
-     - ./tasks/:/inginious/tasks
-     - ./backups/:/inginious/backups
+     - ./inginious:/inginious/
      # See https://github.com/UCL-INGI/INGInious/issues/799
      - /tmp/agent_data/:/tmp/agent_data/
     networks:
       - inginious
 
   agent-mcq:
-    image: ${REGISTRY}/inginious/core-agent_mcq:${VERSION}
+    image: csr.csel.io/inginious/inginious:v0.8.7
+    command: inginious-agent-mcq tcp://backend:2001
     depends_on:
       - backend
     deploy:
       replicas: 1
-    environment:
-      BACKEND: "tcp://backend:2001"
     volumes:
      # See https://github.com/UCL-INGI/INGInious/issues/352
-     - ./tasks/:/inginious/tasks
-     - ./backups/:/inginious/backups
+     - ./inginious:/inginious/
      # See https://github.com/UCL-INGI/INGInious/issues/799
      - /tmp/agent_data/:/tmp/agent_data/
     networks:
       - inginious
 
   frontend:
-    image: ${REGISTRY}/inginious/core-frontend:${VERSION}
+    image: csr.csel.io/inginious/inginious:v0.8.7
+    #command: uwsgi --fastcgi-socket :9020 --wsgi-file /usr/local/bin/inginious-webapp --buffer-size=32768 --processes 1 --threads 1 --socket-timeout=120  --static-map /static=/usr/local/lib/python3.10/dist-packages/inginious/frontend/static --logto /inginious/logs/inginious.log
+    command: uwsgi --fastcgi-socket :9020 --wsgi-file /usr/local/bin/inginious-webapp --chdir /inginious --buffer-size=32768 --processes 1 --threads 1 --socket-timeout=120  --static-map /static=/usr/local/lib/python3.10/dist-packages/inginious/frontend/static
     depends_on:
       - backend
       - agent-docker
       - agent-mcq
-    environment:
-      - INGINIOUS_WEBAPP_HOST=0.0.0.0
     volumes:
-      - ./configuration.deploy.yaml:/inginious/configuration.yaml
-      - ./tasks/:/inginious/tasks
-      - ./backups/:/inginious/backups
+     - ./inginious:/inginious/
     ports:
-      - 9000:8080
+      - 127.0.0.1:9020:9020
     networks:
       - inginious
 
 networks:
   inginious:
+
+volumes:
+  mongodbdata: {}
