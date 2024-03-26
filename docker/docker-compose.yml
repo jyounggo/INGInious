@@ -10,7 +10,7 @@ services:
       - /etc/localtime:/etc/localtime:ro
 
   backend:
-    image: csr.csel.io/inginious/inginious:v0.8.7
+    image: csr.csel.io/inginious/inginious:v0.8
     command: inginious-backend tcp://0.0.0.0:2001 tcp://0.0.0.0:2000
     depends_on:
       - db
@@ -18,7 +18,7 @@ services:
       - inginious
 
   agent-docker:
-    image: csr.csel.io/inginious/inginious:v0.8.7
+    image: csr.csel.io/inginious/inginious:v0.8
     depends_on:
       - backend
     deploy:
@@ -34,7 +34,7 @@ services:
       - inginious
 
   agent-mcq:
-    image: csr.csel.io/inginious/inginious:v0.8.7
+    image: csr.csel.io/inginious/inginious:v0.8
     command: inginious-agent-mcq tcp://backend:2001
     depends_on:
       - backend
@@ -49,15 +49,17 @@ services:
       - inginious
 
   frontend:
-    image: csr.csel.io/inginious/inginious:v0.8.7
+    image: csr.csel.io/inginious/inginious:v0.8
     #command: uwsgi --fastcgi-socket :9020 --wsgi-file /usr/local/bin/inginious-webapp --buffer-size=32768 --processes 1 --threads 1 --socket-timeout=120  --static-map /static=/usr/local/lib/python3.10/dist-packages/inginious/frontend/static --logto /inginious/logs/inginious.log
     command: uwsgi --fastcgi-socket :9020 --wsgi-file /usr/local/bin/inginious-webapp --chdir /inginious --buffer-size=32768 --processes 1 --threads 1 --socket-timeout=120  --static-map /static=/usr/local/lib/python3.10/dist-packages/inginious/frontend/static
+    #command: /run.sh
     depends_on:
       - backend
       - agent-docker
       - agent-mcq
     volumes:
      - ./inginious:/inginious/
+    # - ./run.sh:/run.sh
     ports:
       - 127.0.0.1:9020:9020
     networks:
