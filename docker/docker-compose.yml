@@ -1,15 +1,17 @@
 services:
   db:
+    restart: always
     image: mongo:6.0.2
     networks:
       - inginious
     volumes:
       - ./mongodb:/data/db
-      - /home/jipa4409/dump:/mnt/mongo/dump
+     #- /home/jipa4409/dump:/mnt/mongo/dump
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
 
   backend:
+    restart: always
     image: csr.csel.io/inginious/inginious:v0.8
     command: inginious-backend tcp://0.0.0.0:2001 tcp://0.0.0.0:2000
     depends_on:
@@ -18,12 +20,14 @@ services:
       - inginious
 
   agent-docker:
+    restart: always
     image: csr.csel.io/inginious/inginious:v0.8
     depends_on:
       - backend
     deploy:
-      replicas: 1
+      replicas: 2
     command: inginious-agent-docker tcp://backend:2001 --tmpdir=/tmp/agent_data/ --debug-host inginious-node-01.cs.colorado.edu
+   #command: inginious-agent-docker tcp://backend:2001 -v --debugmode --tmpdir=/tmp/agent_data/ --debug-host inginious-node-01.cs.colorado.edu
     volumes:
      - /var/run/docker.sock:/var/run/docker.sock
      # See https://github.com/UCL-INGI/INGInious/issues/352
@@ -34,6 +38,7 @@ services:
       - inginious
 
   agent-mcq:
+    restart: always
     image: csr.csel.io/inginious/inginious:v0.8
     command: inginious-agent-mcq tcp://backend:2001
     depends_on:
@@ -49,9 +54,11 @@ services:
       - inginious
 
   frontend:
+    restart: always
     image: csr.csel.io/inginious/inginious:v0.8
     #command: uwsgi --fastcgi-socket :9020 --wsgi-file /usr/local/bin/inginious-webapp --buffer-size=32768 --processes 1 --threads 1 --socket-timeout=120  --static-map /static=/usr/local/lib/python3.10/dist-packages/inginious/frontend/static --logto /inginious/logs/inginious.log
-    command: uwsgi --fastcgi-socket :9020 --wsgi-file /usr/local/bin/inginious-webapp --chdir /inginious --buffer-size=32768 --processes 1 --threads 1 --socket-timeout=120  --static-map /static=/usr/local/lib/python3.10/dist-packages/inginious/frontend/static
+    #command: uwsgi --fastcgi-socket :9020 --wsgi-file /usr/local/bin/inginious-webapp --uid 1000 --chdir /inginious --buffer-size=32768 --processes 1 --threads 1 --socket-timeout=120  --static-map /static=/usr/local/lib/python3.10/dist-packages/inginious/frontend/static
+    command: uwsgi --ini /inginious/uwsgi.ini
     #command: /run.sh
     depends_on:
       - backend
@@ -59,6 +66,7 @@ services:
       - agent-mcq
     volumes:
      - ./inginious:/inginious/
+     - ./uwsgi.ini:/inginious/uwsgi.ini
     # - ./run.sh:/run.sh
     ports:
       - 127.0.0.1:9020:9020

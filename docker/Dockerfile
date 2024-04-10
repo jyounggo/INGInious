@@ -8,5 +8,7 @@ RUN apt-get update && \
         pkg-config && \
     apt-get clean
 
+# Create a user
+RUN useradd -r -u 1000 inginious
 RUN pip3 install --no-cache-dir git+https://github.com/jyounggo/INGInious.git@inginious-0.8#egg=INGInious[uwsgi,saml2]
 WORKDIR /inginious
