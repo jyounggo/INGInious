@@ -476,8 +476,14 @@ class UserManager:
             user_profile = self._database.users.find_one({"email": email})
             if user_profile:
                 # Found an email, existing user account, abort without binding
-                self._logger.exception("The binding email is already used by another account!")
-                return False
+                #self._logger.exception("The binding email is already used by another account!")
+                #return False
+
+                # Jinyoung
+                self._logger.warn("The email" + email +" is already bind by another binding. Update the existing binding")
+                self._database.users.find_one_and_update({"username": user_profile["username"]},
+                                            {"$set": {"bindings." + auth_id: [username, additional]}})
+                self.connect_user(user_profile["username"], realname, email, self._session.get("language", "en"), False)
             else:
                 # New user, create an account using email address
                 self._database.users.insert_one({"username": "",
