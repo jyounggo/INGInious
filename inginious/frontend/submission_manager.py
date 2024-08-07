@@ -309,17 +309,6 @@ class WebAppSubmissionManager:
                 key_str = "@lti_" + key
                 inputdata[key_str] = lti_info[key]
 
-        # Send LTI information to the client except "consumer_key"
-        lti_info = self._user_manager.session_lti_info()
-        if lti_info:
-            for key in lti_info:
-                if key == "consumer_key" or key.startswith("outcome"): # Skip "consumer_key" and "outcome*"
-                    continue
-                self._logger.debug("LTI data : %s, %s",key, lti_info[key])
-                # Add @lti_ prefix
-                key_str = "@lti_" + key
-                inputdata[key_str] = lti_info[key]
-
         self._plugin_manager.call_hook("new_submission", submission=obj, inputdata=inputdata)
 
         self._before_submission_insertion(course, task, inputdata, debug, obj)
